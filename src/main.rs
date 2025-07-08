@@ -1,3 +1,4 @@
+pub mod a_normalize;
 pub mod alpha;
 pub mod ast;
 pub mod calyx_ast;
@@ -11,12 +12,18 @@ fn main() {
     let ast = hls::program(IMPUT);
     match ast {
         Ok(program) => {
-            println!("Original AST:");
-            println!("{:?}", program);
-
-            println!("\nAfter Alpha Conversion:");
             let alpha_converted = alpha_convert_program(&program);
-            println!("{:?}", alpha_converted);
+            let normalized = a_normalize::normalize_program(alpha_converted);
+            println!("{:?}", normalized);
+            // let mut converter = convert::Converter::init();
+            // match converter.convert(alpha_converted) {
+            //     Ok(()) => {
+            //         println!("{}", converter.program);
+            //     }
+            //     Err(e) => {
+            //         println!("Conversion error: {}", e);
+            //     }
+            // }
         }
         Err(e) => {
             println!("Parse error: {}", e);
@@ -35,4 +42,5 @@ fn main() =
     let squared: i32[16] = map(sum_a_b, (x) => x * x) in
     let result: i32 = reduce(squared, (x, y) => x + y) in
     out[0] := result
+    // out[0] := 0
 "#;

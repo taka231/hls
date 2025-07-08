@@ -2,13 +2,19 @@ use std::ops::{Add, Mul};
 
 pub type Ident = String;
 
-pub type Program = Vec<TopLevel>;
+pub type Program_<BaseExpr> = Vec<TopLevel_<BaseExpr>>;
+
+pub type Program = Program_<BaseExpr>;
+pub type ANormalProgram = Program_<ANormalBaseExpr>;
 
 #[derive(Debug, Clone)]
-pub enum TopLevel {
+pub enum TopLevel_<BaseExpr> {
     ExternalDecl(ExternalDecl),
-    FunDef(FunDef),
+    FunDef(FunDef_<BaseExpr>),
 }
+
+pub type TopLevel = TopLevel_<BaseExpr>;
+pub type ANormalTopLevel = TopLevel_<ANormalBaseExpr>;
 
 #[derive(Debug, Clone)]
 pub struct ExternalDecl {
@@ -17,14 +23,17 @@ pub struct ExternalDecl {
 }
 
 #[derive(Debug, Clone)]
-pub struct FunDef {
+pub struct FunDef_<BaseExpr> {
     pub name: Ident,
     pub params: Vec<(Ident, Type)>,
     pub return_type: Option<Type>,
-    pub body: Expr,
+    pub body: Expr_<BaseExpr>,
 }
 
-#[derive(Debug, Clone)]
+pub type FunDef = FunDef_<BaseExpr>;
+pub type ANormalFunDef = FunDef_<ANormalBaseExpr>;
+
+#[derive(Debug, Clone, PartialEq)]
 pub enum Type {
     I(usize),
     Array(Box<Type>, usize),
@@ -47,6 +56,7 @@ impl Type {
 #[derive(Debug, Clone)]
 pub enum BaseExpr {
     Int(i32),
+    Bool(bool),
     Var(Ident),
     Add(Box<BaseExpr>, Box<BaseExpr>),
     Mul(Box<BaseExpr>, Box<BaseExpr>),
@@ -58,25 +68,48 @@ pub enum BaseExpr {
 }
 
 #[derive(Debug, Clone)]
-pub struct BindLet {
+pub enum ANormalBaseExpr {
+    Int(i32),
+    Bool(bool),
+    Var(Ident),
+    Add(Ident, Ident),
+    Mul(Ident, Ident),
+    NewArray(Box<Type>, usize),
+    Map(Vec<Ident>, Vec<Ident>, Box<ANormalExpr>),
+    Reduce(Ident, Ident, Ident, Box<ANormalExpr>),
+    Call(Ident, Vec<Ident>),
+    ArraySet(Ident, Box<Ident>, Box<Ident>),
+}
+
+#[derive(Debug, Clone)]
+pub struct BindLet_<BaseExpr> {
     pub name: Ident,
     pub ty: Type,
     pub value: BaseExpr,
 }
 
+pub type BindLet = BindLet_<BaseExpr>;
+pub type ANormalBindLet = BindLet_<ANormalBaseExpr>;
+
 #[derive(Debug, Clone)]
-pub struct NoBindLet {
+pub struct NoBindLet_<BaseExpr> {
     pub value: BaseExpr,
 }
 
+pub type NoBindLet = NoBindLet_<BaseExpr>;
+pub type ANormalNoBindLet = NoBindLet_<ANormalBaseExpr>;
+
 #[derive(Debug, Clone)]
-pub enum Let {
-    BindLet(BindLet),
-    NoBindLet(NoBindLet),
+pub enum Let_<BaseExpr> {
+    BindLet(BindLet_<BaseExpr>),
+    NoBindLet(NoBindLet_<BaseExpr>),
 }
 
-pub fn let_(name: &str, ty: Type, value: BaseExpr) -> BindLet {
-    BindLet {
+pub type Let = Let_<BaseExpr>;
+pub type ANormalLet = Let_<ANormalBaseExpr>;
+
+pub fn let_<BaseExpr>(name: &str, ty: Type, value: BaseExpr) -> BindLet_<BaseExpr> {
+    BindLet_ {
         name: name.to_string(),
         ty,
         value,
@@ -84,7 +117,10 @@ pub fn let_(name: &str, ty: Type, value: BaseExpr) -> BindLet {
 }
 
 #[derive(Debug, Clone)]
-pub struct Expr(pub Vec<Let>, pub BaseExpr);
+pub struct Expr_<BaseExpr>(pub Vec<Let_<BaseExpr>>, pub BaseExpr);
+
+pub type Expr = Expr_<BaseExpr>;
+pub type ANormalExpr = Expr_<ANormalBaseExpr>;
 
 impl BaseExpr {
     pub fn var(name: &str) -> Self {

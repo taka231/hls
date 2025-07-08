@@ -77,7 +77,7 @@ impl AlphaContext {
     }
 
     fn alpha_convert_expr(&mut self, expr: &Expr) -> Expr {
-        let Expr(lets, base) = expr;
+        let Expr_(lets, base) = expr;
 
         let mut new_lets = Vec::new();
 
@@ -88,7 +88,7 @@ impl AlphaContext {
 
         let new_base = self.alpha_convert_base_expr(base);
 
-        Expr(new_lets, new_base)
+        Expr_(new_lets, new_base)
     }
 
     fn alpha_convert_let(&mut self, let_binding: &Let) -> Let {
@@ -96,7 +96,7 @@ impl AlphaContext {
             Let::BindLet(bind_let) => {
                 let new_value = self.alpha_convert_base_expr(&bind_let.value);
                 let new_name = self.bind(&bind_let.name);
-                
+
                 Let::BindLet(BindLet {
                     name: new_name,
                     ty: bind_let.ty.clone(),
@@ -105,10 +105,8 @@ impl AlphaContext {
             }
             Let::NoBindLet(no_bind_let) => {
                 let new_value = self.alpha_convert_base_expr(&no_bind_let.value);
-                
-                Let::NoBindLet(NoBindLet {
-                    value: new_value,
-                })
+
+                Let::NoBindLet(NoBindLet { value: new_value })
             }
         }
     }
@@ -116,6 +114,7 @@ impl AlphaContext {
     fn alpha_convert_base_expr(&mut self, expr: &BaseExpr) -> BaseExpr {
         match expr {
             BaseExpr::Int(n) => BaseExpr::Int(*n),
+            BaseExpr::Bool(b) => BaseExpr::Bool(*b),
             BaseExpr::Var(name) => BaseExpr::Var(self.lookup(name)),
 
             BaseExpr::Add(left, right) => {

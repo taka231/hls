@@ -48,10 +48,10 @@ parser! {
 
         pub rule expr() -> Expr
             = lets:let_bindings() _ "in" _ base:base_expr() {
-                Expr(lets, base)
+                Expr_(lets, base)
             }
             / base:base_expr() {
-                Expr(vec![], base)
+                Expr_(vec![], base)
             }
 
         rule let_bindings() -> Vec<Let>
@@ -78,7 +78,7 @@ parser! {
 
         rule term() -> BaseExpr
             = n:number() { BaseExpr::Int(n) }
-            / b:boolean() { BaseExpr::Int(if b { 1 } else { 0 }) }
+            / b:boolean() { BaseExpr::Bool(b) }
             / func_call:function_call() { func_call }
             / id:identifier() { BaseExpr::Var(id) }
             / "(" _ e:base_expr() _ ")" { e }
@@ -109,12 +109,12 @@ parser! {
 
         rule lambda_expr() -> (String, Expr)
             = "(" _ param:identifier() _ ")" _ "=>" _ body:base_expr() {
-                (param, Expr(vec![], body))
+                (param, Expr_(vec![], body))
             }
 
         rule lambda_expr_multi() -> (Vec<String>, Expr)
             = "(" _ params:param_list_lambda() _ ")" _ "=>" _ body:base_expr() {
-                (params, Expr(vec![], body))
+                (params, Expr_(vec![], body))
             }
 
         rule param_list_lambda() -> Vec<String>
@@ -122,7 +122,7 @@ parser! {
 
         rule lambda_expr_2() -> (String, String, Expr)
             = "(" _ param1:identifier() _ "," _ param2:identifier() _ ")" _ "=>" _ body:base_expr() {
-                (param1, param2, Expr(vec![], body))
+                (param1, param2, Expr_(vec![], body))
             }
 
         rule number() -> i32
