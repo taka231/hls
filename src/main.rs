@@ -13,14 +13,20 @@ fn main() {
     match ast {
         Ok(program) => {
             let alpha_converted = alpha_convert_program(&program);
-            let normalized = a_normalize::normalize_program(alpha_converted);
-            let mut converter = convert::Converter::init();
-            match converter.convert(normalized) {
-                Ok(()) => {
-                    println!("{}", converter.program);
+            match a_normalize::normalize_program(alpha_converted) {
+                Ok(normalized) => {
+                    let mut converter = convert::Converter::init();
+                    match converter.convert(normalized) {
+                        Ok(()) => {
+                            println!("{}", converter.program);
+                        }
+                        Err(e) => {
+                            println!("Conversion error: {}", e);
+                        }
+                    }
                 }
                 Err(e) => {
-                    println!("Conversion error: {}", e);
+                    println!("A-normalization error: {}", e);
                 }
             }
         }
@@ -40,5 +46,5 @@ fn main() =
     // let squared: i32[16] = map(sum_a_b, (x) => x * x) in
     // let result: i32 = reduce(squared, (x, y) => x + y) in
     // out[0] := result
-    out[0] := 1
+    out[0] := 1 + 2
 "#;
