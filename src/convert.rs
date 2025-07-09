@@ -188,7 +188,44 @@ impl Converter {
                 }
                 Ok(calyx_ast::Control::empty())
             })),
-            ast::ANormalBaseExpr::Add(var1, var2) => todo!(),
+            ast::ANormalBaseExpr::Add(var1, var2) => {
+                let var1 = self.find_src_by_var(var1)?;
+                let var2 = self.find_src_by_var(var2)?;
+                Ok(Box::new(move |dest: Option<String>| {
+                    if let Some(dest) = dest {
+                        let new_add_cell = calyx_ast::Cell {
+                            name: dest.clone(),
+                            is_external: false,
+                            circuit: calyx_ast::Circuit::StdAdd { width: 32 },
+                        };
+                        self.get_current_func()?.cells.push(new_add_cell);
+                        let left_wire = calyx_ast::Wire {
+                            dest: calyx_ast::Port {
+                                cell: dest.clone(),
+                                port: "left".to_string(),
+                            },
+                            src: var1.clone(),
+                        };
+                        let right_wire = calyx_ast::Wire {
+                            dest: calyx_ast::Port {
+                                cell: dest.clone(),
+                                port: "right".to_string(),
+                            },
+                            src: var2.clone(),
+                        };
+                        self.get_current_func()?.wires.static_wires.push(left_wire);
+                        self.get_current_func()?.wires.static_wires.push(right_wire);
+                        self.env.insert(
+                            dest.clone(),
+                            calyx_ast::Src::Port(calyx_ast::Port {
+                                cell: dest.clone(),
+                                port: "out".to_string(),
+                            }),
+                        );
+                    }
+                    Ok(calyx_ast::Control::empty())
+                }))
+            }
             ast::ANormalBaseExpr::Mul(var1, var2) => todo!(),
             ast::ANormalBaseExpr::NewArray(_, _) => todo!(),
             ast::ANormalBaseExpr::Map(vars, items, expr) => todo!(),
@@ -217,7 +254,7 @@ impl Converter {
                     });
                     group.done = Some(array.port("done").into());
                     let group_name = group.name.clone();
-                    self.get_current_func()?.wires.push(group);
+                    self.get_current_func()?.wires.groups.push(group);
                     if let Some(dest) = dest {
                         self.env.insert(dest.clone(), value);
                     }

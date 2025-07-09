@@ -38,7 +38,7 @@ pub struct Component {
     pub params: Vec<(String, Type)>,
     pub result: Vec<(String, Type)>,
     pub cells: Vec<Cell>,
-    pub wires: Vec<Group>,
+    pub wires: Wires,
     pub control: Vec<Control>,
 }
 
@@ -59,7 +59,10 @@ impl Component {
             params,
             result,
             cells: vec![],
-            wires: vec![],
+            wires: Wires {
+                static_wires: vec![],
+                groups: vec![],
+            },
             control: vec![],
         }
     }
@@ -98,12 +101,7 @@ impl Display for Component {
 
         // Format wires section
         writeln!(f, "  wires {{")?;
-        for group in &self.wires {
-            let group_str = format!("{}", group);
-            for line in group_str.lines() {
-                writeln!(f, "    {}", line)?;
-            }
-        }
+        writeln!(f, "{}", self.wires)?;
         writeln!(f, "  }}")?;
 
         // Format control section
@@ -179,6 +177,24 @@ impl Display for Circuit {
 }
 
 #[derive(Debug, Clone)]
+pub struct Wires {
+    pub static_wires: Vec<Wire>,
+    pub groups: Vec<Group>,
+}
+
+impl Display for Wires {
+    fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
+        for wire in &self.static_wires {
+            writeln!(f, "    {}", wire)?;
+        }
+        for group in &self.groups {
+            writeln!(f, "    {}", group)?;
+        }
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone)]
 pub struct Group {
     pub name: String,
     pub done: Option<Src>,
@@ -194,13 +210,13 @@ impl Display for Group {
         }
 
         for wire in &self.wires {
-            writeln!(f, "  {}", wire)?;
+            writeln!(f, "      {}", wire)?;
         }
         if let Some(done) = &self.done {
-            writeln!(f, "  {}[done] = {};", self.name, done)?;
+            writeln!(f, "      {}[done] = {};", self.name, done)?;
         }
 
-        write!(f, "}}")
+        write!(f, "    }}")
     }
 }
 

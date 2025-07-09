@@ -46,5 +46,7 @@ fn main() =
     // let squared: i32[16] = map(sum_a_b, (x) => x * x) in
     // let result: i32 = reduce(squared, (x, y) => x + y) in
     // out[0] := result
-    out[0] := 1 + 2
+    let x: i32 = 1 in
+    let y: i32 = 2 in
+    out[0] := x + y
 "#;
