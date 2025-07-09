@@ -36,16 +36,24 @@ impl Display for Program {
 pub struct Component {
     pub name: String,
     pub params: Vec<(String, Type)>,
-    pub result: Option<(String, Type)>,
+    pub result: Vec<(String, Type)>,
     pub cells: Vec<Cell>,
     pub wires: Vec<Group>,
     pub control: Vec<Control>,
 }
 
+impl Component {
+    pub fn push_control(&mut self, control: Control) {
+        if !control.is_empty() {
+            self.control.push(control);
+        }
+    }
+}
+
 pub type Type = usize;
 
 impl Component {
-    pub fn new(name: &str, params: Vec<(String, Type)>, result: Option<(String, Type)>) -> Self {
+    pub fn new(name: &str, params: Vec<(String, Type)>, result: Vec<(String, Type)>) -> Self {
         Component {
             name: name.to_string(),
             params,
@@ -69,12 +77,15 @@ impl Display for Component {
             }
             write!(f, "{}: {}", name, ty)?;
         }
-        write!(f, ")")?;
+        write!(f, ") -> (")?;
 
-        // Format result type
-        if let Some((name, ty)) = &self.result {
-            write!(f, " -> ({}: {})", name, ty)?;
+        for (i, (name, ty)) in self.result.iter().enumerate() {
+            if i > 0 {
+                write!(f, ", ")?;
+            }
+            write!(f, "{}: {}", name, ty)?;
         }
+        write!(f, ")")?;
 
         writeln!(f, " {{")?;
 
@@ -99,7 +110,7 @@ impl Display for Component {
         writeln!(f, "  control {{")?;
         writeln!(f, "    seq {{")?;
         for control in &self.control {
-            writeln!(f, "      {};", control)?;
+            writeln!(f, "      {}", control)?;
         }
         writeln!(f, "    }}")?;
         writeln!(f, "  }}")?;
@@ -119,7 +130,7 @@ impl Display for Cell {
     fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
         let ref_ = if self.circuit.is_memory() { "ref" } else { "" };
         if self.is_external {
-            write!(f, "@external {ref_} {} = {};", self.name, self.circuit)
+            write!(f, "@external(1) {} = {};", self.name, self.circuit)
         } else {
             write!(f, "{ref_} {} = {};", self.name, self.circuit)
         }
@@ -170,13 +181,13 @@ impl Display for Circuit {
 #[derive(Debug, Clone)]
 pub struct Group {
     pub name: String,
-    pub is_comb: bool,
+    pub done: Option<Src>,
     pub wires: Vec<Wire>,
 }
 
 impl Display for Group {
     fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
-        if self.is_comb {
+        if self.done.is_none() {
             writeln!(f, "comb group {} {{", self.name)?;
         } else {
             writeln!(f, "group {} {{", self.name)?;
@@ -184,6 +195,9 @@ impl Display for Group {
 
         for wire in &self.wires {
             writeln!(f, "  {}", wire)?;
+        }
+        if let Some(done) = &self.done {
+            writeln!(f, "  {}[done] = {};", self.name, done)?;
         }
 
         write!(f, "}}")
@@ -203,16 +217,22 @@ impl Display for Wire {
 }
 
 #[derive(Debug, Clone)]
-pub enum Port {
-    Port(String, String),
-    Done(String),
+pub struct Port {
+    pub cell: String,
+    pub port: String,
 }
 
 impl Display for Port {
     fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
-        match self {
-            Port::Port(cell, port) => write!(f, "{}.{}", cell, port),
-            Port::Done(cell) => write!(f, "{}[done]", cell),
+        write!(f, "{}.{}", self.cell, self.port)
+    }
+}
+
+impl Port {
+    pub fn port(&self, port: &str) -> Self {
+        Port {
+            cell: self.cell.clone(),
+            port: port.to_string(),
         }
     }
 }
@@ -221,6 +241,12 @@ impl Display for Port {
 pub enum Src {
     Port(Port),
     Int { width: usize, value: isize },
+}
+
+impl From<Port> for Src {
+    fn from(port: Port) -> Self {
+        Src::Port(port)
+    }
 }
 
 impl Display for Src {

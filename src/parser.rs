@@ -43,7 +43,7 @@ parser! {
             / basic_type()
 
         rule basic_type() -> Type
-            = "i" n:number() { Type::I(n as usize) }
+            = "i32" { Type::I(32) }
             / "bool" { Type::I(1) }
 
         pub rule expr() -> Expr
