@@ -929,7 +929,6 @@ impl Converter {
                 address_width: ADDRESS_WIDTH,
             },
         });
-        // let mem_port = calyx_ast::Port::Port(decl.name.clone(), "read_data".to_string());
         let mem_port: calyx_ast::Src = calyx_ast::Port {
             cell: decl.name.clone(),
             port: "read_data".to_string(),

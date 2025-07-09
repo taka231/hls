@@ -283,7 +283,32 @@ fn normalize_base_expr(
                 normalized_arrays.push(array_ident);
             }
 
+            // Add lambda parameters to type environment
+            let saved_env = state.type_env.clone();
+
+            // Infer the element type from the first array
+            if let Some(first_array) = normalized_arrays.first() {
+                let array_type = state.get_type(first_array)?;
+                let element_type = match array_type {
+                    Type::Array(element_ty, _) => (*element_ty).clone(),
+                    _ => {
+                        return Err(anyhow::anyhow!(
+                            "Map: Expected array type, got {:?}",
+                            array_type
+                        ))
+                    }
+                };
+
+                // Add all lambda parameters with element type
+                for param in &params {
+                    state.insert_type(param.clone(), element_type.clone());
+                }
+            }
+
             let normalized_body = normalize_expr_with_state(*body, state)?;
+
+            // Restore type environment
+            state.type_env = saved_env;
 
             Ok((
                 bindings,
@@ -326,7 +351,29 @@ fn normalize_base_expr(
                 }
             };
 
+            // Add lambda parameters to type environment
+            let saved_env = state.type_env.clone();
+
+            // Infer the element type from the array
+            let array_type = state.get_type(&array_ident)?;
+            let element_type = match array_type {
+                Type::Array(element_ty, _) => (*element_ty).clone(),
+                _ => {
+                    return Err(anyhow::anyhow!(
+                        "Reduce: Expected array type, got {:?}",
+                        array_type
+                    ))
+                }
+            };
+
+            // Add lambda parameters with element type
+            state.insert_type(param1.clone(), element_type.clone());
+            state.insert_type(param2.clone(), element_type);
+
             let normalized_body = normalize_expr_with_state(*body, state)?;
+
+            // Restore type environment
+            state.type_env = saved_env;
 
             Ok((
                 bindings,
@@ -408,6 +455,34 @@ pub fn normalize_fundef(fundef: FunDef) -> Result<ANormalFunDef> {
     })
 }
 
+fn normalize_fundef_with_externals(
+    fundef: FunDef,
+    external_context: &[ANormalTopLevel],
+) -> Result<ANormalFunDef> {
+    let mut state = NormalizeState::new();
+
+    // Add external declarations to type environment
+    for top_level in external_context {
+        if let ANormalTopLevel::ExternalDecl(external_decl) = top_level {
+            state.insert_type(external_decl.name.clone(), external_decl.ty.clone());
+        }
+    }
+
+    // Add function parameters to type environment
+    for (param_name, param_type) in &fundef.params {
+        state.insert_type(param_name.clone(), param_type.clone());
+    }
+
+    let normalized_body = normalize_expr_with_state(fundef.body, &mut state)?;
+
+    Ok(crate::ast::FunDef_ {
+        name: fundef.name,
+        params: fundef.params,
+        return_type: fundef.return_type,
+        body: normalized_body,
+    })
+}
+
 pub fn normalize_top_level(top_level: TopLevel) -> Result<ANormalTopLevel> {
     match top_level {
         TopLevel::ExternalDecl(external_decl) => Ok(ANormalTopLevel::ExternalDecl(external_decl)),
@@ -416,5 +491,34 @@ pub fn normalize_top_level(top_level: TopLevel) -> Result<ANormalTopLevel> {
 }
 
 pub fn normalize_program(program: Program) -> Result<ANormalProgram> {
-    program.into_iter().map(normalize_top_level).collect()
+    // First, collect all external declarations
+    let mut external_decls = Vec::new();
+    let mut function_defs = Vec::new();
+
+    for top_level in program {
+        match top_level {
+            TopLevel::ExternalDecl(external_decl) => {
+                external_decls.push(external_decl.clone());
+            }
+            TopLevel::FunDef(fundef) => {
+                function_defs.push(fundef);
+            }
+        }
+    }
+
+    // Normalize all items with access to external declarations
+    let mut result = Vec::new();
+
+    // Add external declarations first
+    for external_decl in external_decls {
+        result.push(ANormalTopLevel::ExternalDecl(external_decl));
+    }
+
+    // Normalize functions with external declarations in scope
+    for fundef in function_defs {
+        let normalized_fundef = normalize_fundef_with_externals(fundef, &result)?;
+        result.push(ANormalTopLevel::FunDef(normalized_fundef));
+    }
+
+    Ok(result)
 }
