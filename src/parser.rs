@@ -71,6 +71,7 @@ parser! {
             }
             / precedence! {
                 left:(@) _ "+" _ right:@ { BaseExpr::Add(Box::new(left), Box::new(right)) }
+                --
                 left:(@) _ "*" _ right:@ { BaseExpr::Mul(Box::new(left), Box::new(right)) }
                 --
                 t:term() { t }

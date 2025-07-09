@@ -48,6 +48,25 @@ impl Component {
             self.control.push(control);
         }
     }
+
+    fn find_cell(&self, name: &str) -> Option<&Cell> {
+        self.cells.iter().find(|cell| cell.name == name)
+    }
+
+    pub fn get_mult_cell(&mut self, width: usize) -> Cell {
+        let name = format!("_mult_{}", width);
+        if let Some(cell) = self.find_cell(&name) {
+            cell.clone()
+        } else {
+            let cell = Cell {
+                name: name.clone(),
+                is_external: false,
+                circuit: Circuit::StdMultPipe { width },
+            };
+            self.cells.push(cell.clone());
+            cell
+        }
+    }
 }
 
 pub type Type = usize;
@@ -148,7 +167,7 @@ pub enum Circuit {
     StdAdd {
         width: usize,
     },
-    StdMul {
+    StdMultPipe {
         width: usize,
     },
 }
@@ -171,7 +190,7 @@ impl Display for Circuit {
             }
             Circuit::StdReg { width } => write!(f, "std_reg({})", width),
             Circuit::StdAdd { width } => write!(f, "std_add({})", width),
-            Circuit::StdMul { width } => write!(f, "std_mul({})", width),
+            Circuit::StdMultPipe { width } => write!(f, "std_mult_pipe({})", width),
         }
     }
 }

@@ -121,20 +121,30 @@ impl Converter {
         //     None
         // };
         //
-        self.convert_expr(body, None)?;
+        let control = self.convert_expr(body, None)?;
+        self.get_current_func()?.push_control(control);
 
         Ok(())
     }
 
-    fn convert_expr(&mut self, expr: &ast::ANormalExpr, out: Option<String>) -> Result<()> {
+    fn convert_expr(
+        &mut self,
+        expr: &ast::ANormalExpr,
+        out: Option<String>,
+    ) -> Result<calyx_ast::Control> {
         let ast::Expr_(lets, body) = expr;
+        let mut seq_vec = vec![];
         for let_binding in lets {
             let control = self.convert_let(let_binding)?;
-            self.get_current_func()?.push_control(control);
+            if !control.is_empty() {
+                seq_vec.push(control);
+            }
         }
         let control = self.convert_base_expr(body)?(out)?;
-        self.get_current_func()?.push_control(control);
-        Ok(())
+        if !control.is_empty() {
+            seq_vec.push(control);
+        }
+        Ok(calyx_ast::Control::Seq(seq_vec))
     }
 
     fn convert_let(&mut self, let_binding: &ast::ANormalLet) -> Result<calyx_ast::Control> {
@@ -226,7 +236,80 @@ impl Converter {
                     Ok(calyx_ast::Control::empty())
                 }))
             }
-            ast::ANormalBaseExpr::Mul(var1, var2) => todo!(),
+            ast::ANormalBaseExpr::Mul(var1, var2) => {
+                let var1 = self.find_src_by_var(var1)?;
+                let var2 = self.find_src_by_var(var2)?;
+                Ok(Box::new(move |dest: Option<String>| {
+                    if let Some(dest) = dest {
+                        let mult_cell = self.get_current_func()?.get_mult_cell(32);
+                        let dest_cell = calyx_ast::Cell {
+                            name: dest.clone(),
+                            is_external: false,
+                            circuit: calyx_ast::Circuit::StdReg { width: 32 },
+                        };
+                        self.env.insert(
+                            dest.clone(),
+                            calyx_ast::Src::Port(calyx_ast::Port {
+                                cell: dest.clone(),
+                                port: "out".to_string(),
+                            }),
+                        );
+                        self.get_current_func()?.cells.push(dest_cell);
+                        let mut group = self.new_group();
+                        group.wires.push(calyx_ast::Wire {
+                            dest: calyx_ast::Port {
+                                cell: mult_cell.name.clone(),
+                                port: "left".to_string(),
+                            },
+                            src: var1.clone(),
+                        });
+                        group.wires.push(calyx_ast::Wire {
+                            dest: calyx_ast::Port {
+                                cell: mult_cell.name.clone(),
+                                port: "right".to_string(),
+                            },
+                            src: var2.clone(),
+                        });
+                        group.wires.push(calyx_ast::Wire {
+                            dest: calyx_ast::Port {
+                                cell: mult_cell.name.clone(),
+                                port: "go".to_string(),
+                            },
+                            src: calyx_ast::Src::Int { value: 1, width: 1 },
+                        });
+                        group.wires.push(calyx_ast::Wire {
+                            dest: calyx_ast::Port {
+                                cell: dest.clone(),
+                                port: "in".to_string(),
+                            },
+                            src: calyx_ast::Src::Port(calyx_ast::Port {
+                                cell: mult_cell.name.clone(),
+                                port: "out".to_string(),
+                            }),
+                        });
+                        group.wires.push(calyx_ast::Wire {
+                            dest: calyx_ast::Port {
+                                cell: dest.clone(),
+                                port: "write_en".to_string(),
+                            },
+                            src: calyx_ast::Port {
+                                cell: mult_cell.name.clone(),
+                                port: "done".to_string(),
+                            }
+                            .into(),
+                        });
+                        group.done = Some(calyx_ast::Src::Port(calyx_ast::Port {
+                            cell: dest.clone(),
+                            port: "done".to_string(),
+                        }));
+                        let group_name = group.name.clone();
+                        self.get_current_func()?.wires.groups.push(group);
+                        Ok(calyx_ast::Control::GroupName(group_name))
+                    } else {
+                        Ok(calyx_ast::Control::empty())
+                    }
+                }))
+            }
             ast::ANormalBaseExpr::NewArray(_, _) => todo!(),
             ast::ANormalBaseExpr::Map(vars, items, expr) => todo!(),
             ast::ANormalBaseExpr::Reduce(var, _, _, expr) => todo!(),

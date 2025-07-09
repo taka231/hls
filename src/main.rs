@@ -48,5 +48,5 @@ fn main() =
     // out[0] := result
     let x: i32 = 1 in
     let y: i32 = 2 in
-    out[0] := x + y
+    out[0] := x + y * 3
 "#;
