@@ -19,7 +19,7 @@ impl NormalizeState {
     }
 
     fn fresh_temp(&mut self) -> Ident {
-        let name = format!("_tmp_{}", self.temp_counter);
+        let name = format!("_{}", self.temp_counter);
         self.temp_counter += 1;
         name
     }
@@ -84,7 +84,7 @@ fn infer_anormal_type(expr: &ANormalBaseExpr, state: &NormalizeState) -> Result<
                 Err(anyhow::anyhow!("Map: Empty array list"))
             }
         }
-        ANormalBaseExpr::Reduce(array, _, _, _) => {
+        ANormalBaseExpr::Reduce(array, _, _, _, _) => {
             let array_ty = state.get_type(array)?;
             match array_ty {
                 Type::Array(element_ty, _) => Ok((*element_ty).clone()),
@@ -291,10 +291,27 @@ fn normalize_base_expr(
             ))
         }
 
-        BaseExpr::Reduce(array, param1, param2, body) => {
+        BaseExpr::Reduce(array, init_value, param1, param2, body) => {
             let (mut bindings, array_result) = normalize_base_expr(*array, state)?;
+            let (mut init_bindings, init_result) = normalize_base_expr(*init_value, state)?;
+            bindings.append(&mut init_bindings);
 
             let array_ident = match array_result {
+                ANormalBaseExpr::Var(name) => name,
+                other => {
+                    let temp_name = state.fresh_temp();
+                    let inferred_ty = infer_anormal_type(&other, state)?;
+                    state.insert_type(temp_name.clone(), inferred_ty.clone());
+                    bindings.push(ANormalLet::BindLet(crate::ast::BindLet_ {
+                        name: temp_name.clone(),
+                        ty: inferred_ty,
+                        value: other,
+                    }));
+                    temp_name
+                }
+            };
+
+            let init_ident = match init_result {
                 ANormalBaseExpr::Var(name) => name,
                 other => {
                     let temp_name = state.fresh_temp();
@@ -313,7 +330,13 @@ fn normalize_base_expr(
 
             Ok((
                 bindings,
-                ANormalBaseExpr::Reduce(array_ident, param1, param2, Box::new(normalized_body)),
+                ANormalBaseExpr::Reduce(
+                    array_ident,
+                    init_ident,
+                    param1,
+                    param2,
+                    Box::new(normalized_body),
+                ),
             ))
         }
     }

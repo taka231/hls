@@ -62,7 +62,7 @@ pub enum BaseExpr {
     Mul(Box<BaseExpr>, Box<BaseExpr>),
     NewArray(Box<Type>, usize),
     Map(Vec<BaseExpr>, Vec<Ident>, Box<Expr>),
-    Reduce(Box<BaseExpr>, Ident, Ident, Box<Expr>),
+    Reduce(Box<BaseExpr>, Box<BaseExpr>, Ident, Ident, Box<Expr>),
     Call(Ident, Vec<BaseExpr>),
     ArraySet(Ident, Box<BaseExpr>, Box<BaseExpr>),
 }
@@ -76,7 +76,7 @@ pub enum ANormalBaseExpr {
     Mul(Ident, Ident),
     NewArray(Box<Type>, usize),
     Map(Vec<Ident>, Vec<Ident>, Box<ANormalExpr>),
-    Reduce(Ident, Ident, Ident, Box<ANormalExpr>),
+    Reduce(Ident, Ident, Ident, Ident, Box<ANormalExpr>),
     Call(Ident, Vec<Ident>),
     ArraySet(Ident, Box<Ident>, Box<Ident>),
 }
@@ -136,9 +136,10 @@ impl BaseExpr {
         BaseExpr::Map(arrays, param_strings, Box::new(body))
     }
 
-    pub fn reduce(array: BaseExpr, param1: &str, param2: &str, body: Expr) -> Self {
+    pub fn reduce(array: BaseExpr, init_value: BaseExpr, param1: &str, param2: &str, body: Expr) -> Self {
         BaseExpr::Reduce(
             array.into(),
+            init_value.into(),
             param1.to_string(),
             param2.to_string(),
             body.into(),

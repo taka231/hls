@@ -94,8 +94,8 @@ parser! {
             / "map" _ "(" _ array:base_expr() _ "," _ lambda:lambda_expr() _ ")" {
                 BaseExpr::Map(vec![array], vec![lambda.0], Box::new(lambda.1))
             }
-            / "reduce" _ "(" _ array:base_expr() _ "," _ lambda:lambda_expr_2() _ ")" {
-                BaseExpr::Reduce(Box::new(array), lambda.0, lambda.1, Box::new(lambda.2))
+            / "reduce" _ "(" _ array:base_expr() _ "," _ init_value:base_expr() _ "," _ lambda:lambda_expr_2() _ ")" {
+                BaseExpr::Reduce(Box::new(array), Box::new(init_value), lambda.0, lambda.1, Box::new(lambda.2))
             }
             / name:identifier() _ "(" _ args:argument_list() _ ")" {
                 BaseExpr::Call(name, args)

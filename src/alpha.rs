@@ -145,8 +145,9 @@ impl AlphaContext {
                 BaseExpr::Map(new_arrays, new_params, Box::new(new_body))
             }
 
-            BaseExpr::Reduce(array, param1, param2, body) => {
+            BaseExpr::Reduce(array, init_value, param1, param2, body) => {
                 let new_array = self.alpha_convert_base_expr(array);
+                let new_init_value = self.alpha_convert_base_expr(init_value);
 
                 let saved_env = self.env.clone();
                 let new_param1 = self.bind(param1);
@@ -156,6 +157,7 @@ impl AlphaContext {
 
                 BaseExpr::Reduce(
                     Box::new(new_array),
+                    Box::new(new_init_value),
                     new_param1,
                     new_param2,
                     Box::new(new_body),
