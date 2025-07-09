@@ -160,11 +160,10 @@ pub struct Cell {
 
 impl Display for Cell {
     fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
-        let ref_ = if self.circuit.is_memory() { "ref" } else { "" };
         if self.is_external {
             write!(f, "@external(1) {} = {};", self.name, self.circuit)
         } else {
-            write!(f, "{ref_} {} = {};", self.name, self.circuit)
+            write!(f, "{} = {};", self.name, self.circuit)
         }
     }
 }

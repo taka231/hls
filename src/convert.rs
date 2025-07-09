@@ -310,7 +310,288 @@ impl Converter {
             }
             ast::ANormalBaseExpr::NewArray(_, _) => todo!(),
             ast::ANormalBaseExpr::Map(vars, args, expr) => {
-                todo!()
+                let Some(Type::Array(content_ty, size)) = self.type_env.get(vars.first().unwrap())
+                else {
+                    return Err(anyhow::anyhow!("Expected an array type for map"));
+                };
+                let Type::I(width) = &**content_ty else {
+                    return Err(anyhow::anyhow!("Expected an integer type for map"));
+                };
+                let size = *size;
+                let width = *width;
+                let args: Vec<String> = args.iter().map(|arg| arg.to_string()).collect();
+                let vars: Vec<calyx_ast::Port> = vars
+                    .iter()
+                    .map(|var| match self.find_src_by_var(var)? {
+                        calyx_ast::Src::Port(port) => Ok(port),
+                        _ => Err(anyhow::anyhow!("Expected a port for variable {}", var)),
+                    })
+                    .collect::<Result<_>>()?;
+                for arg in &args {
+                    self.type_env.insert(arg.clone(), Type::I(width));
+                }
+                Ok(Box::new(move |dest: Option<String>| {
+                    let mut seq_vec = vec![];
+                    let add_cell = self.get_current_func()?.get_add_cell(32);
+                    let new_vec = calyx_ast::Cell {
+                        name: self.fresh_name(),
+                        is_external: false,
+                        circuit: calyx_ast::Circuit::CombMemD1 {
+                            data_width: width,
+                            len: size,
+                            address_width: ADDRESS_WIDTH,
+                        },
+                    };
+                    self.get_current_func()?.cells.push(new_vec.clone());
+                    let count_reg = calyx_ast::Cell {
+                        name: self.fresh_name(),
+                        is_external: false,
+                        circuit: calyx_ast::Circuit::StdReg {
+                            width: ADDRESS_WIDTH,
+                        },
+                    };
+                    self.get_current_func()?.cells.push(count_reg.clone());
+                    let arg_regs: Vec<calyx_ast::Cell> = args
+                        .iter()
+                        .map(|arg| {
+                            let arg_reg = calyx_ast::Cell {
+                                name: self.fresh_name(),
+                                is_external: false,
+                                circuit: calyx_ast::Circuit::StdReg { width },
+                            };
+                            self.get_current_func()?.cells.push(arg_reg.clone());
+                            self.env.insert(
+                                arg.clone(),
+                                calyx_ast::Src::Port(calyx_ast::Port {
+                                    cell: arg_reg.name.clone(),
+                                    port: "out".to_string(),
+                                }),
+                            );
+                            Ok(arg_reg)
+                        })
+                        .collect::<Result<_>>()?;
+
+                    let cond_lt = calyx_ast::Cell {
+                        name: self.fresh_name(),
+                        is_external: false,
+                        circuit: calyx_ast::Circuit::StdLt {
+                            width: ADDRESS_WIDTH,
+                        },
+                    };
+                    self.get_current_func()?.cells.push(cond_lt.clone());
+                    if let Some(dest) = dest {
+                        self.env.insert(
+                            dest.clone(),
+                            calyx_ast::Src::Port(calyx_ast::Port {
+                                cell: new_vec.name.clone(),
+                                port: "read_data".to_string(),
+                            }),
+                        );
+                    }
+
+                    let mut init_count_reg_group = self.new_group();
+                    init_count_reg_group.wires.push(calyx_ast::Wire {
+                        dest: calyx_ast::Port {
+                            cell: count_reg.name.clone(),
+                            port: "in".to_string(),
+                        },
+                        src: calyx_ast::Src::Int {
+                            value: 0,
+                            width: ADDRESS_WIDTH,
+                        },
+                    });
+                    init_count_reg_group.wires.push(calyx_ast::Wire {
+                        dest: calyx_ast::Port {
+                            cell: count_reg.name.clone(),
+                            port: "write_en".to_string(),
+                        },
+                        src: calyx_ast::Src::Int { value: 1, width: 1 },
+                    });
+                    init_count_reg_group.done = Some(calyx_ast::Src::Port(calyx_ast::Port {
+                        cell: count_reg.name.clone(),
+                        port: "done".to_string(),
+                    }));
+                    seq_vec.push(calyx_ast::Control::GroupName(
+                        init_count_reg_group.name.clone(),
+                    ));
+                    self.get_current_func()?
+                        .wires
+                        .groups
+                        .push(init_count_reg_group);
+
+                    let mut cond_lt_group = self.new_group();
+                    cond_lt_group.wires.push(calyx_ast::Wire {
+                        dest: calyx_ast::Port {
+                            cell: cond_lt.name.clone(),
+                            port: "left".to_string(),
+                        },
+                        src: calyx_ast::Src::Port(calyx_ast::Port {
+                            cell: count_reg.name.clone(),
+                            port: "out".to_string(),
+                        }),
+                    });
+                    cond_lt_group.wires.push(calyx_ast::Wire {
+                        dest: calyx_ast::Port {
+                            cell: cond_lt.name.clone(),
+                            port: "right".to_string(),
+                        },
+                        src: calyx_ast::Src::Int {
+                            value: size as isize,
+                            width: ADDRESS_WIDTH,
+                        },
+                    });
+                    let cond_lt_group_name = cond_lt_group.name.clone();
+                    self.get_current_func()?
+                        .wires
+                        .groups
+                        .push(cond_lt_group.clone());
+
+                    let mut init_args_groups = vec![];
+                    for (i, arg_reg) in arg_regs.iter().enumerate() {
+                        let mut init_arg_group = self.new_group();
+                        init_arg_group.wires.push(calyx_ast::Wire {
+                            dest: vars[i].port("addr0"),
+                            src: calyx_ast::Src::Port(calyx_ast::Port {
+                                cell: count_reg.name.clone(),
+                                port: "out".to_string(),
+                            }),
+                        });
+                        init_arg_group.wires.push(calyx_ast::Wire {
+                            dest: calyx_ast::Port {
+                                cell: arg_reg.name.clone(),
+                                port: "in".to_string(),
+                            },
+                            src: calyx_ast::Src::Port(vars[i].clone()),
+                        });
+                        init_arg_group.wires.push(calyx_ast::Wire {
+                            dest: calyx_ast::Port {
+                                cell: arg_reg.name.clone(),
+                                port: "write_en".to_string(),
+                            },
+                            src: calyx_ast::Src::Int { value: 1, width: 1 },
+                        });
+                        init_arg_group.done = Some(calyx_ast::Src::Port(calyx_ast::Port {
+                            cell: arg_reg.name.clone(),
+                            port: "done".to_string(),
+                        }));
+                        init_args_groups.push(init_arg_group.name.clone());
+                        self.get_current_func()?.wires.groups.push(init_arg_group);
+                    }
+                    let result_var = self.fresh_name();
+                    let body_control = self.convert_expr(expr, Some(result_var.clone()))?;
+                    let result = self.env.get(&result_var).cloned().ok_or_else(|| {
+                        anyhow::anyhow!(
+                            "internal error: Expected result variable {} to be in environment",
+                            result_var
+                        )
+                    })?;
+                    let mut result_reg_group = self.new_group();
+                    result_reg_group.wires.push(calyx_ast::Wire {
+                        dest: calyx_ast::Port {
+                            cell: new_vec.name.clone(),
+                            port: "addr0".to_string(),
+                        },
+                        src: calyx_ast::Src::Port(calyx_ast::Port {
+                            cell: count_reg.name.clone(),
+                            port: "out".to_string(),
+                        }),
+                    });
+                    result_reg_group.wires.push(calyx_ast::Wire {
+                        dest: calyx_ast::Port {
+                            cell: new_vec.name.clone(),
+                            port: "write_data".to_string(),
+                        },
+                        src: result,
+                    });
+                    result_reg_group.wires.push(calyx_ast::Wire {
+                        dest: calyx_ast::Port {
+                            cell: new_vec.name.clone(),
+                            port: "write_en".to_string(),
+                        },
+                        src: calyx_ast::Src::Int { value: 1, width: 1 },
+                    });
+                    result_reg_group.done = Some(calyx_ast::Src::Port(calyx_ast::Port {
+                        cell: new_vec.name.clone(),
+                        port: "done".to_string(),
+                    }));
+                    self.get_current_func()?
+                        .wires
+                        .groups
+                        .push(result_reg_group.clone());
+
+                    let mut inc_count_group = self.new_group();
+                    inc_count_group.wires.push(calyx_ast::Wire {
+                        dest: calyx_ast::Port {
+                            cell: add_cell.name.clone(),
+                            port: "left".to_string(),
+                        },
+                        src: calyx_ast::Src::Port(calyx_ast::Port {
+                            cell: count_reg.name.clone(),
+                            port: "out".to_string(),
+                        }),
+                    });
+                    inc_count_group.wires.push(calyx_ast::Wire {
+                        dest: calyx_ast::Port {
+                            cell: add_cell.name.clone(),
+                            port: "right".to_string(),
+                        },
+                        src: calyx_ast::Src::Int {
+                            value: 1,
+                            width: ADDRESS_WIDTH,
+                        },
+                    });
+                    inc_count_group.wires.push(calyx_ast::Wire {
+                        dest: calyx_ast::Port {
+                            cell: count_reg.name.clone(),
+                            port: "in".to_string(),
+                        },
+                        src: calyx_ast::Src::Port(calyx_ast::Port {
+                            cell: add_cell.name.clone(),
+                            port: "out".to_string(),
+                        }),
+                    });
+                    inc_count_group.wires.push(calyx_ast::Wire {
+                        dest: calyx_ast::Port {
+                            cell: count_reg.name.clone(),
+                            port: "write_en".to_string(),
+                        },
+                        src: calyx_ast::Src::Int { value: 1, width: 1 },
+                    });
+                    inc_count_group.done = Some(calyx_ast::Src::Port(calyx_ast::Port {
+                        cell: count_reg.name.clone(),
+                        port: "done".to_string(),
+                    }));
+                    self.get_current_func()?
+                        .wires
+                        .groups
+                        .push(inc_count_group.clone());
+
+                    let mut loop_body = vec![];
+                    loop_body.push(calyx_ast::Control::Seq(
+                        init_args_groups
+                            .into_iter()
+                            .map(calyx_ast::Control::GroupName)
+                            .collect::<Vec<_>>(),
+                    ));
+                    if !body_control.is_empty() {
+                        loop_body.push(body_control);
+                    }
+                    loop_body.push(calyx_ast::Control::GroupName(result_reg_group.name.clone()));
+                    loop_body.push(calyx_ast::Control::GroupName(inc_count_group.name.clone()));
+
+                    let loop_control = calyx_ast::Control::While {
+                        condition: calyx_ast::Port {
+                            cell: cond_lt.name.clone(),
+                            port: "out".to_string(),
+                        },
+                        with: Some(cond_lt_group_name),
+                        body: loop_body,
+                    };
+
+                    seq_vec.push(loop_control);
+
+                    Ok(calyx_ast::Control::Seq(seq_vec))
+                }))
             }
             ast::ANormalBaseExpr::Reduce(array, init_value, acm, arg, expr) => {
                 let Some(Type::Array(content_ty, size)) = &self.type_env.get(array) else {

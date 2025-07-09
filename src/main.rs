@@ -21,12 +21,12 @@ fn main() -> Result<()> {
 
 static INPUT: &str = r#"
 external a: i32[4];
-// external b: i32[4];
+external b: i32[4];
 external out: i32[1];
 
 fn main() = 
-    // let sum_a_b: i32[4] = map(a, b, (x, y) => x + y) in
-    // let squared: i32[4] = map(sum_a_b, (x) => x * x) in
-    let result: i32 = reduce(a, 0, (x, y) => x + y) in
+    let sum_a_b: i32[4] = map(a, b, (x, y) => x + y) in
+    let squared: i32[4] = map(sum_a_b, (x) => x * x) in
+    let result: i32 = reduce(squared, 0, (x, y) => x + y) in
     out[0] := result
 "#;
