@@ -61,6 +61,7 @@ impl Component {
             let cell = Cell {
                 name: name.clone(),
                 is_external: false,
+                is_ref: false,
                 circuit: Circuit::StdMultPipe { width },
             };
             self.cells.push(cell.clone());
@@ -76,6 +77,7 @@ impl Component {
             let cell = Cell {
                 name: name.clone(),
                 is_external: false,
+                is_ref: false,
                 circuit: Circuit::StdAdd { width },
             };
             self.cells.push(cell.clone());
@@ -155,6 +157,7 @@ impl Display for Component {
 pub struct Cell {
     pub name: String,
     pub is_external: bool,
+    pub is_ref: bool,
     pub circuit: Circuit,
 }
 
@@ -187,6 +190,9 @@ pub enum Circuit {
     StdLt {
         width: usize,
     },
+    FunInstance {
+        name: String,
+    },
 }
 
 impl Circuit {
@@ -209,11 +215,14 @@ impl Display for Circuit {
             Circuit::StdAdd { width } => write!(f, "std_add({})", width),
             Circuit::StdMultPipe { width } => write!(f, "std_mult_pipe({})", width),
             Circuit::StdLt { width } => write!(f, "std_lt({})", width),
+            Circuit::FunInstance { name } => {
+                write!(f, "{}()", name)
+            }
         }
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct Wires {
     pub static_wires: Vec<Wire>,
     pub groups: Vec<Group>,
@@ -277,6 +286,9 @@ pub struct Port {
 
 impl Display for Port {
     fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
+        if self.port.is_empty() {
+            return write!(f, "{}", self.cell);
+        }
         write!(f, "{}.{}", self.cell, self.port)
     }
 }

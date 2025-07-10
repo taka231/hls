@@ -16,13 +16,13 @@ parser! {
             }
 
         pub rule fundef() -> FunDef
-            = "fn" _ name:identifier() _ "(" _ params:param_list() _ ")" _ return_type:return_type_annotation()? _ "=" _ body:expr() _ {
+            = "fn" _ name:identifier() _ "(" _ params:param_list() _ ")" _ return_type:return_type_annotation()? _ "=" _ body:expr() _ ";" {
                 FunDef { name, params, return_type, body }
             }
-            / "fn" _ name:identifier() _ "()" _ return_type:return_type_annotation()? _ "=" _ body:expr() _  {
+            / "fn" _ name:identifier() _ "()" _ return_type:return_type_annotation()? _ "=" _ body:expr() _ ";" {
                 FunDef { name, params: vec![], return_type, body }
             }
-            / "fn" _ name:identifier() _ return_type:return_type_annotation()? _ "=" _ body:expr() _ {
+            / "fn" _ name:identifier() _ return_type:return_type_annotation()? _ "=" _ body:expr() _ ";" {
                 FunDef { name, params: vec![], return_type, body }
             }
 

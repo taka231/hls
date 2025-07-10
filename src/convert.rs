@@ -16,6 +16,7 @@ pub struct Converter {
     // HashMap<VariableName, CellName>
     pub env: HashMap<String, calyx_ast::Src>,
     pub type_env: HashMap<String, ast::Type>,
+    pub fun_type_env: HashMap<String, (Vec<(String, Type)>, Option<Type>)>,
 }
 
 impl Converter {
@@ -36,6 +37,7 @@ impl Converter {
             current_func: None,
             env: HashMap::new(),
             type_env: HashMap::new(),
+            fun_type_env: HashMap::new(),
         }
     }
 
@@ -96,6 +98,8 @@ impl Converter {
         Ok(())
     }
 
+    const FUN_OUT_NAME: &'static str = "_out";
+
     fn convert_fundef(&mut self, fundef: &ast::ANormalFunDef) -> Result<()> {
         let ast::FunDef_ {
             name,
@@ -103,6 +107,8 @@ impl Converter {
             return_type,
             body,
         } = fundef;
+        self.fun_type_env
+            .insert(name.clone(), (params.clone(), return_type.clone()));
         self.current_func = Some(name.clone());
         let is_main = name == "main";
         if is_main && !(params.is_empty() && return_type.is_none()) {
@@ -111,18 +117,168 @@ impl Converter {
             ));
         }
         if !is_main {
-            todo!()
+            let mut component_params: Vec<(String, usize)> = vec![];
+            let mut cells: Vec<calyx_ast::Cell> = vec![];
+            for (param_name, param_type) in params {
+                self.type_env.insert(param_name.clone(), param_type.clone());
+                match param_type {
+                    ast::Type::I(width) => {
+                        component_params.push((param_name.clone(), *width));
+                        self.env.insert(
+                            param_name.clone(),
+                            calyx_ast::Src::Port(calyx_ast::Port {
+                                cell: param_name.clone(),
+                                port: "".to_string(),
+                            }),
+                        );
+                    }
+                    ast::Type::Array(content_ty, size) => {
+                        if let ast::Type::I(width) = &**content_ty {
+                            let array_ref_cell = calyx_ast::Cell {
+                                name: param_name.clone(),
+                                is_external: false,
+                                is_ref: true,
+                                circuit: calyx_ast::Circuit::CombMemD1 {
+                                    data_width: *width,
+                                    len: *size,
+                                    address_width: ADDRESS_WIDTH,
+                                },
+                            };
+                            cells.push(array_ref_cell);
+                            self.env.insert(
+                                param_name.clone(),
+                                calyx_ast::Src::Port(calyx_ast::Port {
+                                    cell: param_name.clone(),
+                                    port: "read_data".to_string(),
+                                }),
+                            );
+                        } else {
+                            return Err(anyhow::anyhow!(
+                                "Expected an integer type for array parameter"
+                            ));
+                        }
+                    }
+                };
+            }
+
+            let result = if let Some(ty) = return_type {
+                let name = Converter::FUN_OUT_NAME.to_string();
+                match ty {
+                    ast::Type::I(width) => {
+                        self.type_env.insert(name.clone(), ty.clone());
+                        self.env.insert(
+                            name.clone(),
+                            calyx_ast::Src::Port(calyx_ast::Port {
+                                cell: name.clone(),
+                                port: "out".to_string(),
+                            }),
+                        );
+                        vec![(name.clone(), *width)]
+                    }
+                    ast::Type::Array(content_ty, size) => {
+                        if let ast::Type::I(width) = &**content_ty {
+                            let array_cell = calyx_ast::Cell {
+                                name: name.clone(),
+                                is_external: false,
+                                is_ref: false,
+                                circuit: calyx_ast::Circuit::CombMemD1 {
+                                    data_width: *width,
+                                    len: *size,
+                                    address_width: ADDRESS_WIDTH,
+                                },
+                            };
+                            cells.push(array_cell);
+                            self.env.insert(
+                                name.clone(),
+                                calyx_ast::Src::Port(calyx_ast::Port {
+                                    cell: name.clone(),
+                                    port: "read_data".to_string(),
+                                }),
+                            );
+                            vec![]
+                        } else {
+                            return Err(anyhow::anyhow!(
+                                "Expected an integer type for array return type"
+                            ));
+                        }
+                    }
+                }
+            } else {
+                vec![]
+            };
+
+            let component = calyx_ast::Component {
+                name: name.clone(),
+                params: component_params,
+                result,
+                wires: calyx_ast::Wires::default(),
+                cells,
+                control: vec![],
+            };
+            self.program.components.push(component);
         }
 
-        // let out = if let Some(ty) = return_type {
-        //     self.program.main.result = Some((name.clone(), ty.clone()));
-        //     Some(name.clone())
-        // } else {
-        //     None
-        // };
-        //
-        let control = self.convert_expr(body, None)?;
+        let out = if return_type.is_none() || matches!(return_type, Some(ast::Type::Array(..))) {
+            None
+        } else {
+            let name = self.fresh_name();
+            Some(name.clone())
+        };
+
+        let control = self.convert_expr(body, out.clone())?;
         self.get_current_func()?.push_control(control);
+
+        if return_type.is_some() && matches!(return_type, Some(ast::Type::I(..))) {
+            let result = self.find_src_by_var(out.as_ref().unwrap())?;
+            let output_cell = calyx_ast::Cell {
+                name: self.fresh_name(),
+                is_external: false,
+                is_ref: false,
+                circuit: calyx_ast::Circuit::StdReg {
+                    width: match return_type.as_ref().unwrap() {
+                        ast::Type::I(width) => *width,
+                        _ => unreachable!("Expected an integer type for output"),
+                    },
+                },
+            };
+            self.get_current_func()?.cells.push(output_cell.clone());
+            let mut group = self.new_group();
+            group.wires.push(calyx_ast::Wire {
+                dest: calyx_ast::Port {
+                    cell: output_cell.name.clone(),
+                    port: "in".to_string(),
+                },
+                src: result,
+            });
+            group.wires.push(calyx_ast::Wire {
+                dest: calyx_ast::Port {
+                    cell: output_cell.name.clone(),
+                    port: "write_en".to_string(),
+                },
+                src: calyx_ast::Src::Int { value: 1, width: 1 },
+            });
+            group.done = Some(calyx_ast::Src::Port(calyx_ast::Port {
+                cell: output_cell.name.clone(),
+                port: "done".to_string(),
+            }));
+            self.get_current_func()?
+                .control
+                .push(calyx_ast::Control::GroupName(group.name.clone()));
+            self.get_current_func()?.wires.groups.push(group);
+            self.get_current_func()?
+                .wires
+                .static_wires
+                .push(calyx_ast::Wire {
+                    dest: calyx_ast::Port {
+                        cell: Converter::FUN_OUT_NAME.to_string(),
+                        port: "".to_string(),
+                    },
+                    src: calyx_ast::Src::Port(calyx_ast::Port {
+                        cell: output_cell.name.clone(),
+                        port: "out".to_string(),
+                    }),
+                });
+        }
 
         Ok(())
     }
@@ -204,6 +360,7 @@ impl Converter {
                         let new_add_cell = calyx_ast::Cell {
                             name: new_add_cell_name.clone(),
                             is_external: false,
+                            is_ref: false,
                             circuit: calyx_ast::Circuit::StdAdd { width: 32 },
                         };
                         self.get_current_func()?.cells.push(new_add_cell);
@@ -243,6 +400,7 @@ impl Converter {
                         let dest_cell = calyx_ast::Cell {
                             name: dest.clone(),
                             is_external: false,
+                            is_ref: false,
                             circuit: calyx_ast::Circuit::StdReg { width: 32 },
                         };
                         self.env.insert(
@@ -336,6 +494,7 @@ impl Converter {
                     let new_vec = calyx_ast::Cell {
                         name: self.fresh_name(),
                         is_external: false,
+                        is_ref: false,
                         circuit: calyx_ast::Circuit::CombMemD1 {
                             data_width: width,
                             len: size,
@@ -346,6 +505,7 @@ impl Converter {
                     let count_reg = calyx_ast::Cell {
                         name: self.fresh_name(),
                         is_external: false,
+                        is_ref: false,
                         circuit: calyx_ast::Circuit::StdReg {
                             width: ADDRESS_WIDTH,
                         },
@@ -357,6 +517,7 @@ impl Converter {
                             let arg_reg = calyx_ast::Cell {
                                 name: self.fresh_name(),
                                 is_external: false,
+                                is_ref: false,
                                 circuit: calyx_ast::Circuit::StdReg { width },
                             };
                             self.get_current_func()?.cells.push(arg_reg.clone());
@@ -374,6 +535,7 @@ impl Converter {
                     let cond_lt = calyx_ast::Cell {
                         name: self.fresh_name(),
                         is_external: false,
+                        is_ref: false,
                         circuit: calyx_ast::Circuit::StdLt {
                             width: ADDRESS_WIDTH,
                         },
@@ -614,6 +776,7 @@ impl Converter {
                     let acm_reg = calyx_ast::Cell {
                         name: self.fresh_name(),
                         is_external: false,
+                        is_ref: false,
                         circuit: calyx_ast::Circuit::StdReg { width },
                     };
                     self.env.insert(
@@ -635,6 +798,7 @@ impl Converter {
                     let count_reg = calyx_ast::Cell {
                         name: self.fresh_name(),
                         is_external: false,
+                        is_ref: false,
                         circuit: calyx_ast::Circuit::StdReg {
                             width: ADDRESS_WIDTH,
                         },
@@ -642,6 +806,7 @@ impl Converter {
                     let arg_reg = calyx_ast::Cell {
                         name: self.fresh_name(),
                         is_external: false,
+                        is_ref: false,
                         circuit: calyx_ast::Circuit::StdReg { width },
                     };
                     self.env.insert(
@@ -654,6 +819,7 @@ impl Converter {
                     let cond_lt = calyx_ast::Cell {
                         name: self.fresh_name(),
                         is_external: false,
+                        is_ref: false,
                         circuit: calyx_ast::Circuit::StdLt {
                             width: ADDRESS_WIDTH,
                         },
@@ -879,7 +1045,77 @@ impl Converter {
                     Ok(calyx_ast::Control::Seq(seq_vec))
                 }))
             }
-            ast::ANormalBaseExpr::Call(_, vars) => todo!(),
+            ast::ANormalBaseExpr::Call(fun_name, args) => {
+                let args: Vec<calyx_ast::Src> = args
+                    .iter()
+                    .map(|arg| self.find_src_by_var(arg))
+                    .collect::<Result<_>>()?;
+                let fun_name = fun_name.to_string();
+                Ok(Box::new(move |dest: Option<String>| {
+                    let (params, result_ty) = self
+                        .fun_type_env
+                        .get(&fun_name)
+                        .ok_or_else(|| {
+                            anyhow::anyhow!(
+                                "Function {} not found in function environment",
+                                fun_name
+                            )
+                        })?
+                        .clone();
+                    let is_contain_array =
+                        params.iter().any(|(_, ty)| matches!(ty, Type::Array(_, _)))
+                            || result_ty
+                                .as_ref()
+                                .map_or(false, |ty| matches!(ty, Type::Array(_, _)));
+                    if is_contain_array {
+                        todo!()
+                    } else {
+                        let fun = self.fresh_name();
+                        let fun_cell = calyx_ast::Cell {
+                            name: fun,
+                            is_external: false,
+                            is_ref: false,
+                            circuit: calyx_ast::Circuit::FunInstance {
+                                name: fun_name.clone(),
+                            },
+                        };
+                        self.get_current_func()?.cells.push(fun_cell.clone());
+                        let mut group = self.new_group();
+                        for (i, (param_name, _)) in params.iter().enumerate() {
+                            group.wires.push(calyx_ast::Wire {
+                                dest: calyx_ast::Port {
+                                    cell: fun_cell.name.clone(),
+                                    port: param_name.clone(),
+                                },
+                                src: args[i].clone(),
+                            });
+                        }
+                        group.wires.push(calyx_ast::Wire {
+                            dest: calyx_ast::Port {
+                                cell: fun_cell.name.clone(),
+                                port: "go".to_string(),
+                            },
+                            src: calyx_ast::Src::Int { value: 1, width: 1 },
+                        });
+                        if let Some(dest) = dest {
+                            self.env.insert(
+                                dest.clone(),
+                                calyx_ast::Src::Port(calyx_ast::Port {
+                                    cell: fun_cell.name.clone(),
+                                    port: Converter::FUN_OUT_NAME.to_string(),
+                                }),
+                            );
+                        }
+                        group.done = Some(calyx_ast::Src::Port(calyx_ast::Port {
+                            cell: fun_cell.name.clone(),
+                            port: "done".to_string(),
+                        }));
+                        let group_name = group.name.clone();
+                        self.get_current_func()?.wires.groups.push(group);
+                        Ok(calyx_ast::Control::GroupName(group_name))
+                    }
+                }))
+            }
             ast::ANormalBaseExpr::ArraySet(array, index, value) => {
                 let calyx_ast::Src::Port(array) = self.find_src_by_var(array)? else {
                     return Err(anyhow::anyhow!("Expected a port for array variable"));
@@ -923,6 +1159,7 @@ impl Converter {
         self.program.main.cells.push(calyx_ast::Cell {
             name: decl.name.clone(),
             is_external: true,
+            is_ref: false,
             circuit: calyx_ast::Circuit::CombMemD1 {
                 data_width: *width,
                 len: *size,
